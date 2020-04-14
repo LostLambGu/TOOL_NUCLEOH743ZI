@@ -25,9 +25,7 @@
 #include "netif/etharp.h"
 #include "lwip/ethip6.h"
 #include "ethernetif.h"
-/* USER CODE BEGIN Include for User BSP */
-
-/* USER CODE END Include for User BSP */
+#include "lan8742.h"
 #include <string.h>
 #include "cmsis_os.h"
 #include "lwip/tcpip.h"
@@ -114,9 +112,18 @@ ETH_TxPacketConfig TxConfig;
 LWIP_MEMPOOL_DECLARE(RX_POOL, 10, sizeof(struct pbuf_custom), "Zero-copy RX PBUF pool");
 
 /* Private function prototypes -----------------------------------------------*/
-/* USER CODE BEGIN Private function prototypes for User BSP */
+int32_t ETH_PHY_IO_Init(void);
+int32_t ETH_PHY_IO_DeInit (void);
+int32_t ETH_PHY_IO_ReadReg(uint32_t DevAddr, uint32_t RegAddr, uint32_t *pRegVal);
+int32_t ETH_PHY_IO_WriteReg(uint32_t DevAddr, uint32_t RegAddr, uint32_t RegVal);
+int32_t ETH_PHY_IO_GetTick(void);
 
-/* USER CODE END Private function prototypes for User BSP */
+lan8742_Object_t LAN8742;
+lan8742_IOCtx_t  LAN8742_IOCtx = {ETH_PHY_IO_Init,
+                                  ETH_PHY_IO_DeInit,
+                                  ETH_PHY_IO_WriteReg,
+                                  ETH_PHY_IO_ReadReg,
+                                  ETH_PHY_IO_GetTick};
 
 /* USER CODE BEGIN 3 */
 
@@ -256,9 +263,9 @@ static void low_level_init(struct netif *netif)
   osThreadAttr_t attributes;
 /* USER CODE END OS_THREAD_ATTR_CMSIS_RTOS_V2 */
   uint32_t idx = 0;
-/* USER CODE BEGIN low_level_init Variables Intialization for User BSP */
-
-/* USER CODE END low_level_init Variables Intialization for User BSP */
+  ETH_MACConfigTypeDef MACConf;
+  int32_t PHYLinkState;
+  uint32_t duplex, speed = 0;
   /* Start ETH HAL Init */
 
    uint8_t MACAddr[6] ;
@@ -331,15 +338,65 @@ static void low_level_init(struct netif *netif)
   attributes.priority = osPriorityRealtime;
   osThreadNew(ethernetif_input, netif, &attributes);
 /* USER CODE END OS_THREAD_NEW_CMSIS_RTOS_V2 */
-/* USER CODE BEGIN low_level_init Code 1 for User BSP */ 
+/* USER CODE BEGIN PHY_PRE_CONFIG */ 
     
-/* USER CODE END low_level_init Code 1 for User BSP */
+/* USER CODE END PHY_PRE_CONFIG */
+  /* Set PHY IO functions */
+  LAN8742_RegisterBusIO(&LAN8742, &LAN8742_IOCtx);
+
+  /* Initialize the LAN8742 ETH PHY */
+  LAN8742_Init(&LAN8742);
 
   if (hal_eth_init_status == HAL_OK)
   {
-/* USER CODE BEGIN low_level_init Code 2 for User BSP */ 
+    PHYLinkState = LAN8742_GetLinkState(&LAN8742);
+  
+    /* Get link state */  
+    if(PHYLinkState <= LAN8742_STATUS_LINK_DOWN)
+    {
+      netif_set_link_down(netif);
+      netif_set_down(netif);
+    }
+    else 
+    {
+      switch (PHYLinkState)
+      {
+      case LAN8742_STATUS_100MBITS_FULLDUPLEX:
+        duplex = ETH_FULLDUPLEX_MODE;
+        speed = ETH_SPEED_100M;
+        break;
+      case LAN8742_STATUS_100MBITS_HALFDUPLEX:
+        duplex = ETH_HALFDUPLEX_MODE;
+        speed = ETH_SPEED_100M;
+        break;
+      case LAN8742_STATUS_10MBITS_FULLDUPLEX:
+        duplex = ETH_FULLDUPLEX_MODE;
+        speed = ETH_SPEED_10M;
+        break;
+      case LAN8742_STATUS_10MBITS_HALFDUPLEX:
+        duplex = ETH_HALFDUPLEX_MODE;
+        speed = ETH_SPEED_10M;
+        break;
+      default:
+        duplex = ETH_FULLDUPLEX_MODE;
+        speed = ETH_SPEED_100M;
+        break;      
+      }
     
-/* USER CODE END low_level_init Code 2 for User BSP */
+    /* Get MAC Config MAC */
+    HAL_ETH_GetMACConfig(&heth, &MACConf); 
+    MACConf.DuplexMode = duplex;
+    MACConf.Speed = speed;
+    HAL_ETH_SetMACConfig(&heth, &MACConf);
+    
+    HAL_ETH_Start_IT(&heth);
+    netif_set_up(netif);
+    netif_set_link_up(netif);
+    
+/* USER CODE BEGIN PHY_POST_CONFIG */ 
+    
+/* USER CODE END PHY_POST_CONFIG */
+    }
 
   }
   else
@@ -596,9 +653,78 @@ u32_t sys_now(void)
 
 /* USER CODE END 6 */
 
-/* USER CODE BEGIN PHI IO Functions for User BSP */ 
-    
-/* USER CODE END PHI IO Functions for User BSP */
+/*******************************************************************************
+                       PHI IO Functions
+*******************************************************************************/
+/**
+  * @brief  Initializes the MDIO interface GPIO and clocks.
+  * @param  None
+  * @retval 0 if OK, -1 if ERROR
+  */
+int32_t ETH_PHY_IO_Init(void)
+{  
+  /* We assume that MDIO GPIO configuration is already done
+     in the ETH_MspInit() else it should be done here 
+  */
+  
+  /* Configure the MDIO Clock */
+  HAL_ETH_SetMDIOClockRange(&heth);
+  
+  return 0;
+}
+
+/**
+  * @brief  De-Initializes the MDIO interface .
+  * @param  None
+  * @retval 0 if OK, -1 if ERROR
+  */
+int32_t ETH_PHY_IO_DeInit (void)
+{
+  return 0;
+}
+
+/**
+  * @brief  Read a PHY register through the MDIO interface.
+  * @param  DevAddr: PHY port address
+  * @param  RegAddr: PHY register address
+  * @param  pRegVal: pointer to hold the register value 
+  * @retval 0 if OK -1 if Error
+  */
+int32_t ETH_PHY_IO_ReadReg(uint32_t DevAddr, uint32_t RegAddr, uint32_t *pRegVal)
+{
+  if(HAL_ETH_ReadPHYRegister(&heth, DevAddr, RegAddr, pRegVal) != HAL_OK)
+  {
+    return -1;
+  }
+  
+  return 0;
+}
+
+/**
+  * @brief  Write a value to a PHY register through the MDIO interface.
+  * @param  DevAddr: PHY port address
+  * @param  RegAddr: PHY register address
+  * @param  RegVal: Value to be written 
+  * @retval 0 if OK -1 if Error
+  */
+int32_t ETH_PHY_IO_WriteReg(uint32_t DevAddr, uint32_t RegAddr, uint32_t RegVal)
+{
+  if(HAL_ETH_WritePHYRegister(&heth, DevAddr, RegAddr, RegVal) != HAL_OK)
+  {
+    return -1;
+  }
+  
+  return 0;
+}
+
+/**
+  * @brief  Get the time in millisecons used for internal PHY driver process.
+  * @retval Time value
+  */
+int32_t ETH_PHY_IO_GetTick(void)
+{
+  return HAL_GetTick();
+}
 
 /**
   * @brief  Check the ETH link state then update ETH driver and netif link accordingly.
@@ -607,6 +733,9 @@ u32_t sys_now(void)
   */
 void ethernet_link_thread(void* argument)
 {
+  ETH_MACConfigTypeDef MACConf;
+  uint32_t PHYLinkState;
+  uint32_t linkchanged = 0, speed = 0, duplex =0;
   
   struct netif *netif = (struct netif *) argument;
   
@@ -616,6 +745,55 @@ void ethernet_link_thread(void* argument)
   
   for(;;)
   {
+  PHYLinkState = LAN8742_GetLinkState(&LAN8742);
+  
+  if(netif_is_link_up(netif) && (PHYLinkState <= LAN8742_STATUS_LINK_DOWN))
+  {
+    HAL_ETH_Stop_IT(&heth);
+    netif_set_down(netif);
+    netif_set_link_down(netif);
+  }
+  else if(!netif_is_link_up(netif) && (PHYLinkState > LAN8742_STATUS_LINK_DOWN))
+  {
+    switch (PHYLinkState)
+    {
+    case LAN8742_STATUS_100MBITS_FULLDUPLEX:
+      duplex = ETH_FULLDUPLEX_MODE;
+      speed = ETH_SPEED_100M;
+      linkchanged = 1;
+      break;
+    case LAN8742_STATUS_100MBITS_HALFDUPLEX:
+      duplex = ETH_HALFDUPLEX_MODE;
+      speed = ETH_SPEED_100M;
+      linkchanged = 1;
+      break;
+    case LAN8742_STATUS_10MBITS_FULLDUPLEX:
+      duplex = ETH_FULLDUPLEX_MODE;
+      speed = ETH_SPEED_10M;
+      linkchanged = 1;
+      break;
+    case LAN8742_STATUS_10MBITS_HALFDUPLEX:
+      duplex = ETH_HALFDUPLEX_MODE;
+      speed = ETH_SPEED_10M;
+      linkchanged = 1;
+      break;
+    default:
+      break;      
+    }
+    
+    if(linkchanged)
+    {
+      /* Get MAC Config MAC */
+      HAL_ETH_GetMACConfig(&heth, &MACConf); 
+      MACConf.DuplexMode = duplex;
+      MACConf.Speed = speed;
+      HAL_ETH_SetMACConfig(&heth, &MACConf);
+      
+      HAL_ETH_Start_IT(&heth);
+      netif_set_up(netif);
+      netif_set_link_up(netif);
+    }
+  }
 
 /* USER CODE BEGIN ETH link Thread core code for User BSP */
     

@@ -1,8 +1,7 @@
 /**
  ******************************************************************************
-  * File Name          : jdata_conf.h
-  * Description        : This file provides header to "jdata_conf.h" module.
-  *                      It implements also file based read/write functions.
+  * File Name          : jdata_conf.c
+  * Description        : This file implements LibJPEG file based read/write functions.
   *
   ******************************************************************************
   *
@@ -19,10 +18,7 @@
 /* Includes ------------------------------------------------------------------*/
 
 /*FatFS is chosen for File storage*/
-#include "ff.h"
-
-/*FreeRtos Api*/				
-#include "cmsis_os.h"
+#include "jdata_conf.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -31,20 +27,18 @@
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
 
-/*This defines the memory allocation methods.*/
-#define JMALLOC   pvPortMalloc
-#define JFREE     vPortFree
+size_t read_file (FIL  *file, uint8_t *buf, uint32_t sizeofbuf)
+{
+static size_t BytesReadfile ;  
+f_read (file, buf , sizeofbuf, &BytesReadfile); 
+return BytesReadfile;    
+}
 
-/*This defines the File data manager type.*/
-#define JFILE            FIL
-
-size_t read_file (FIL  *file, uint8_t *buf, uint32_t sizeofbuf);
-size_t write_file (FIL  *file, uint8_t *buf, uint32_t sizeofbuf) ;
-
-#define JFREAD(file,buf,sizeofbuf)  \
-read_file (file,buf,sizeofbuf)
-
-#define JFWRITE(file,buf,sizeofbuf)  \
-write_file (file,buf,sizeofbuf)
+size_t write_file (FIL  *file, uint8_t *buf, uint32_t sizeofbuf)
+{
+static size_t BytesWritefile;  
+f_write (file, buf , sizeofbuf, &BytesWritefile); 
+return BytesWritefile; 
+}
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

@@ -21,6 +21,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "fatfs.h"
 #include "iwdg.h"
 #include "libjpeg.h"
 #include "mbedtls.h"
@@ -103,6 +104,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_LIBJPEG_Init();
   /* Up to user define the empty MX_MBEDTLS_Init() function located in mbedtls.c file */
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
